@@ -1,0 +1,4 @@
+.stack-work/
+cached.cabal
+test-output/
+*~
