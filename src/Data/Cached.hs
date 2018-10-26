@@ -52,7 +52,7 @@ b :: Cached Int
 >>> :!rm -f /tmp/cached-ex/*
 >>> :!echo "2" > "/tmp/cached-ex/b"
 >>>
->>> runCached c'
+>>> runShake c'
 # Writing cache (for /tmp/cached-ex/a)
 # Writing cache (for /tmp/cached-ex/c)
 Build completed in 0:01m
@@ -61,7 +61,7 @@ Build completed in 0:01m
     Running it again won't run anything. Since none of the cached or
     source files have changed, there is nothing to re-compute.
 
->>> runCached c'
+>>> runShake c'
 Build completed in 0:01m
 ...
 
@@ -70,7 +70,7 @@ Build completed in 0:01m
     since it does not depend on "b".
 
 >>> :! echo 3 > /tmp/cached-ex/b
->>> runCached c'
+>>> runShake c'
 # Writing cache (for /tmp/cached-ex/c)
 Build completed in 0:01m
 ...
@@ -96,7 +96,7 @@ Cached Build:
 >>> let d = sink' "/tmp/cached-ex/d" (pure 'd')
 >>> let e = sink' "/tmp/cached-ex/e" (pure 'e')
 >>> let de = d <> e
->>> runCached de
+>>> runShake de
 # Writing cache (for /tmp/cached-ex/d)
 # Writing cache (for /tmp/cached-ex/e)
 Build completed in 0:01m
@@ -125,8 +125,8 @@ module Data.Cached (
   , sinkEither
   , tag
   -- * Running
-  , buildCache
-  , runCached
+  , toShakeRules
+  , runShake
   -- * Showing
   , prettyCached
 ) where
@@ -356,13 +356,13 @@ tag path = sinkIO path (\_ -> return ())
 -- ** Building
 
 -- | Get shake 'Rules'.
-buildCache :: Cached a -> Rules ()
-buildCache (CacheFail err) = action $ fail $ unpack err
-buildCache a = build $ cacheBuild a
+toShakeRules :: Cached a -> Rules ()
+toShakeRules (CacheFail err) = action $ fail $ unpack err
+toShakeRules a = buildShakeRules $ cacheBuild a
 
 -- | Run the cached computation using shake.
-runCached :: Cached a -> IO ()
-runCached a = shakeArgs shakeOptions{shakeThreads=0} (buildCache a)
+runShake :: Cached a -> IO ()
+runShake a = shakeArgs shakeOptions{shakeThreads=0} (toShakeRules a)
 
 -- ** Pretty printing
 
@@ -402,8 +402,8 @@ buildList (Build m) = fmap (\(a, (b, c)) -> (a,b,c)) (Map.toList m)
 buildTargets :: Build -> [FilePath]
 buildTargets (Build m) = Map.keys m
 
-build :: Build -> Rules ()
-build b = do
+buildShakeRules :: Build -> Rules ()
+buildShakeRules b = do
             want (buildTargets b)
             foldMap buildOne ( buildList b )
   where buildOne (outPath, write, needs) =
