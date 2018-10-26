@@ -1,4 +1,6 @@
+.shake/
 .stack-work/
 cached.cabal
 test-output/
+doc
 *~
