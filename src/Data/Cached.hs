@@ -48,9 +48,9 @@ b :: Cached Int
     computations and write results to files as expected:
 
 >>> -- Before running, let's make sure the target directory is clean.
->>> :!mkdir -p "/tmp/cache-ex"
+>>> :!mkdir -p /tmp/cached-ex
 >>> :!rm -f /tmp/cached-ex/*
->>> :!echo "2" > "/tmp/cached-ex/b"
+>>> :!echo 2 > /tmp/cached-ex/b
 >>>
 >>> runShake c'
 # Writing cache (for /tmp/cached-ex/a)
@@ -96,10 +96,12 @@ Cached Build:
 >>> let d = sink' "/tmp/cached-ex/d" (pure 'd')
 >>> let e = sink' "/tmp/cached-ex/e" (pure 'e')
 >>> let de = d <> e
->>> runShake de
-# Writing cache (for /tmp/cached-ex/d)
-# Writing cache (for /tmp/cached-ex/e)
-Build completed in 0:01m
+>>> prettyCached de >>= putStrLn
+Cached Value = ()
+Cached Needs:
+Cached Build:
+  /tmp/cached-ex/d
+  /tmp/cached-ex/e
 ...
 -}
 
@@ -117,7 +119,7 @@ module Data.Cached (
   , fromIO
   , source
   , source'
-  -- * Associate cached values to cache files on disk
+  -- * Caching values to files
   , cache
   , cache'
   , sink
@@ -333,10 +335,10 @@ sinkIO path write a = if isBuilt path (cacheBuild a)
 
 -- | Artificially associate a cached value to a "tag" file. It is
 -- sometimes useful to use IO actions to create files, such as files that
--- are created by external commands. One can use this function to do so. For
--- example, consider an external commant "plot" that processes the content
--- of a file "data.csv" and writes an image to "fig.png". The figure creation 
--- can be integrated into the cache system like so:
+-- are created by external commands. For example, consider an external
+-- commant "plot" that processes the content of a file "data.csv" and
+-- writes an image to "fig.png". The figure creation can be integrated
+-- into the cache system like so:
 --
 -- >>> import System.Process (callCommand)
 -- >>> let t = tag "tag_fig" $ fromIO (Set.fromList ["data.csv"]) (callCommand "plot")
@@ -347,7 +349,7 @@ sinkIO path write a = if isBuilt path (cacheBuild a)
 --   tag_fig
 --     data.csv
 -- ...
-tag :: FilePath -> Cached () -> Cached ()
+tag :: FilePath -> Cached a -> Cached ()
 tag path = sinkIO path (\_ -> return ())
 
 
