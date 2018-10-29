@@ -2,7 +2,9 @@
     long) computations between consecutive executions of your
     program. Cached values are recomputed only when needed, i.e. when
     other cached values on which they depend change. Independant
-    computations can be run in parallel for free.
+    computations can be run in parallel for free. It offers convenient
+    fonctions for caching to text files, but caching and uncaching using
+    arbitrary IO actions is also possible.
 
     The module was motivated by writing scientific data flows, simulation
     experiments or data science scripts. Those often involve long
@@ -10,23 +12,17 @@
     are the inputs of others, until final results are produced (values,
     figures, statistical tests, etc.).
 
-    A value of type "Cached a" should be understood as a value of type "a" that is read from a file, or that is produced from data stored in one or more files.
+    = Usage
+
+    A value of type "Cached a" should be understood as a value of type "a" that is read from a file, or that is produced from data stored in one or more files, or even from arbitrary IO actions.
 
     Cached values can be created from pure values,
 
->>> let a = cache' "/tmp/cached-ex/a" (pure (1 :: Int))
->>> :t a
-a :: Cached Int
+>>> let a = cache' "/tmp/cached-ex/a" (pure 1) :: Cached Int
 
     or from files stored on disk.
 
->>> import Data.Text.Read (decimal)
->>> import Data.Text (pack)
->>> let readInt = bimap pack fst . decimal :: Text -> Either Text Int
->>>
->>> let b = source "/tmp/cached-ex/b" readInt
->>> :t b
-b :: Cached Int
+>>> let b = source' "/tmp/cached-ex/b" :: Cached Int
 
     Use the functor and applicative instances to use cached values in
     new computations.
@@ -37,8 +33,7 @@ b :: Cached Int
     The cached value "c" represents a value produced by summing
     together the values stored in "\/tmp\/cached-ex\/a" and
     "\/tmp\/cached-ex\/b". It is not yet associated to its own cache
-    file. To actually store it into a cache file, use the function
-    'cache'' (or 'cache' for values that are not instances of Show and
+    file. To actually store it into a cache file, use 'cache'' (or 'cache' for values that are not instances of Show and
     Read or when you want to control the file format, e.g. writing arrays
     to CSV files)
 
@@ -76,11 +71,9 @@ Build completed in 0:01m
 ...
 
     The cache files and dependencies can be inspected with
-    'prettyCached'. Here, "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/c"
-    are created by the cache system, and the latter depends on
-    "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/b"
+    'prettyCached'. 
 
->>> prettyCached c' >>= putStrLn
+>>> prettyCached c' >>= putStr
 Cached Value = 4
 Cached Needs:
   /tmp/cached-ex/c
@@ -89,20 +82,23 @@ Cached Build:
   /tmp/cached-ex/c
     /tmp/cached-ex/a
     /tmp/cached-ex/b
-...
+
+    The previous output means that the value carried by "c'" is 4, and that in order to be build, it needs the file "\/tmp\/cached-ex\/c". The last field, "Cached Build", lists each file that is to be built by the cache system and their dependencies: "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/c"
+    are created by the cache system, and the latter depends on
+    "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/b"
 
     To put together different independent cached values into a single one so that they all get built together, use '<>'. However, "Cached a" is an instance of Semigroup only if "a" is. You can "sink" the cached values first, which will turn a "Cache a" into a "Cache ()", satisfying the Semigroup constraint.
  
 >>> let d = sink' "/tmp/cached-ex/d" (pure 'd')
 >>> let e = sink' "/tmp/cached-ex/e" (pure 'e')
 >>> let de = d <> e
->>> prettyCached de >>= putStrLn
+>>> prettyCached de >>= putStr
 Cached Value = ()
 Cached Needs:
 Cached Build:
   /tmp/cached-ex/d
   /tmp/cached-ex/e
-...
+
 -}
 
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -112,20 +108,19 @@ module Data.Cached (
   -- * Cached type
     Cached
   -- * Creation
-  --
-  -- | To create cached values from pure values, use 'pure'. Then, to associate
-  -- them with actual cache files on disk, use 'cache' or 'cache''. The
-  -- following functions offer additionnal creation possibilities.
+  -- $creation
   , fromIO
   , source
   , source'
-  -- * Caching values to files
+  -- * Caching values
+  -- $caching
   , cache
   , cache'
+  , cacheIO
   , sink
   , sink'
-  , sinkEither
-  , tag
+  , sinkIO
+  , trigger
   -- * Running
   , toShakeRules
   , runShake
@@ -141,6 +136,8 @@ import qualified Data.Set as Set
 import Data.Text
 import Development.Shake
 
+-- $setup
+-- >>> :set -XOverloadedStrings
 
 
 -- * Cached
@@ -262,6 +259,22 @@ instance Floating a => Floating (Cached a) where
     logBase = liftA2 logBase
     {-# INLINE logBase #-}
 
+-- $creation To create cached values from pure values, use 'pure'.
+--
+-- >>> let a = pure 1 :: Cached Int
+-- >>> prettyCached a >>= putStr
+-- Cached Value = 1
+-- Cached Needs:
+-- Cached Build:
+--
+-- Newly created cached values won't actually be written to files or
+-- attached to IO actions yet, as denoted by the empty "Cached Build"
+-- field.  To associate them with actual cache files on disk, see
+-- section "Caching values" below.
+--
+-- The following functions offer additionnal creation possibilities.
+--
+
 -- | Create a cached value from an IO action that depends on some input files.
 fromIO :: Set FilePath -> IO a -> Cached a
 fromIO needs io = Cached (lift io) needs mempty
@@ -279,90 +292,86 @@ source' :: (Read a) => FilePath -> Cached a
 source' path = source path fromText
   where fromText = bimap pack identity . readEither . unpack
 
--- need :: FilePath -> Cached ()
--- need path = Cached
---   { cacheRead = return ()
---   , cacheNeeds = Set.singleton path
---   , cacheBuild = mempty }
-
 -- | Associate a cached value to a file on disk.
 cache :: FilePath -> (a -> Text) -> (Text -> Either Text a) -> Cached a
-         -> Cached a
-cache _ _ _ (CacheFail err) = CacheFail err
-cache path toText fromText a = if isBuilt path (cacheBuild a)
-  then CacheFail ("The cache file already exists: " <> pack path)
-  else Cached { cacheRead = ExceptT $ fromText <$> readFile path
-             , cacheNeeds = Set.singleton path
-             , cacheBuild = buildSingle path
-                              ( toText <$> cacheRead a
-                                >>= lift . writeFile path)
-                              ( cacheNeeds a )
-                         <> cacheBuild a }
+      -> Cached a
+cache path toText fromText = cacheIO path
+                                     ( writeFile path . toText )
+                                     ( fromText <$> readFile path )
+
+-- $caching
+-- These functions associate cached values to files on disk or IO actions.
 
 -- | A convenient variant of 'cache' when the type of the value to be read is
 -- an instance of 'Read' and 'Show'.
 cache' :: (Show a, Read a) => FilePath -> Cached a -> Cached a
 cache' path = cache path show (bimap pack identity . readEither . unpack)
 
+-- | Caching with arbitrary IO actions (e.g.) writing to and reading from a
+-- database).
+cacheIO :: FilePath -> (a -> IO ()) -> (IO (Either Text a)) -> Cached a
+        -> Cached a
+cacheIO _ _ _ (CacheFail err) = CacheFail err
+cacheIO path write read a = if isBuilt path (cacheBuild a)
+  then CacheFail ("The cache file already exists: " <> pack path)
+  else Cached { cacheRead = ExceptT read
+              , cacheNeeds = Set.singleton path
+              , cacheBuild = buildSingle path
+                               ( cacheRead a >>= lift . write )
+                               ( cacheNeeds a )
+                          <> cacheBuild a }
+
 -- | Associate a cached value to a file on disk without the possibility
 -- to read it back. Useful for storing to a text file the final result of a
 -- computation that doesn't need to be read again, like data for producing
 -- figures, text output, etc.
-sink :: FilePath -> (a -> Text) -> Cached a -> Cached ()
+sink :: FilePath -> (a -> Either Text Text) -> Cached a -> Cached ()
 sink path toText = sinkIO path write
-  where write a = lift $ writeFile path $ toText a
-
--- | For when caching may fail depending on the value to cache.
-sinkEither :: FilePath -> (a -> Either Text Text) -> Cached a -> Cached ()
-sinkEither path toText = sinkIO path write
-  where write a = ExceptT $ traverse (writeFile path) (toText a)
+  where write = traverse (writeFile path) . toText
 
 -- | A convenient variant of 'sink' when the written value type instantiates
 -- 'Show'.
 sink' :: (Show a) => FilePath -> Cached a -> Cached ()
-sink' path = sink path show
+sink' path = sink path (return . show)
 
-sinkIO :: FilePath -> (a -> ExceptT Text IO ()) -> Cached a -> Cached ()
+-- | Sink with an arbitrary IO action.
+sinkIO :: FilePath -> (a -> IO (Either Text ())) -> Cached a -> Cached ()
 sinkIO _ _ (CacheFail err) = CacheFail err
 sinkIO path write a = if isBuilt path (cacheBuild a)
   then CacheFail ("The cache file already exists: " <> pack path)
   else Cached { cacheRead = return ()
               , cacheNeeds = mempty
               , cacheBuild = buildSingle path
-                                         (cacheRead a >>= write)
+                                         (cacheRead a >>= ExceptT . write)
                                          (cacheNeeds a)
                           <> cacheBuild a}
 
--- | Artificially associate a cached value to a "tag" file. It is
--- sometimes useful to use IO actions to create files, such as files that
--- are created by external commands. For example, consider an external
--- commant "plot" that processes the content of a file "data.csv" and
--- writes an image to "fig.png". The figure creation can be integrated
--- into the cache system like so:
+-- | Trigger an IO action that depends on a set of files. For example, 
+-- consider an executable "plot" that processes the content of a file
+-- "data.csv" and writes an image to "fig.png". The figure creation can
+-- be integrated into the cache system like so:
 --
 -- >>> import System.Process (callCommand)
--- >>> let t = tag "tag_fig" $ fromIO (Set.fromList ["data.csv"]) (callCommand "plot")
--- >>> prettyCached t >>= putStrLn
+-- >>> let t = trigger "fig.png" (return <$> callCommand "plot") (Set.fromList ["data.csv"])
+-- >>> prettyCached t >>= putStr
 -- Cached Value = ()
 -- Cached Needs:
 -- Cached Build:
---   tag_fig
+--   fig.png
 --     data.csv
--- ...
-tag :: FilePath -> Cached a -> Cached ()
-tag path = sinkIO path (\_ -> return ())
-
-
+-- 
+trigger :: FilePath -> IO (Either Text ()) -> Set FilePath -> Cached ()
+trigger path action needs = sinkIO path (\_ -> action) (fromIO needs (return ()))
 
 
 -- ** Building
 
--- | Get shake 'Rules'.
+-- | Get shake 'Rules'. Those can be mixed together with other shake rules.
 toShakeRules :: Cached a -> Rules ()
 toShakeRules (CacheFail err) = action $ fail $ unpack err
 toShakeRules a = buildShakeRules $ cacheBuild a
 
--- | Run the cached computation using shake.
+-- | Run the cached computation using shake. If you use the result of this function as your program's main, you can pass shake options as arguments. Try "my-program --help"
 runShake :: Cached a -> IO ()
 runShake a = shakeArgs shakeOptions{shakeThreads=0} (toShakeRules a)
 
@@ -378,8 +387,7 @@ prettyCached (Cached r n b) = do
                        <> "Cached Needs: \n"
                        <> foldMap (\p -> "  " <> pack p <> "\n") n
                        <> "Cached Build: \n"
-                       <> foldMap (\l -> "  " <> l <> "\n")
-                                  (lines $ prettyBuild b)
+                       <> (unlines $ fmap ("  " <>) (lines $ prettyBuild b))
 
 
 -- * Build
@@ -421,7 +429,7 @@ prettyBuild (Build a) = foldMap showOne $ Map.toList a
   where showOne :: (FilePath, (ExceptT Text IO (), Set FilePath)) -> Text
         showOne (target, (_, needs)) =
              pack target <> "\n"
-          <> foldMap (\n -> "  " <> pack n <> "\n") needs
+          <> (unlines $ fmap (\n -> "  " <> pack n) $ Set.toList needs)
 
 
 
