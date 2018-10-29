@@ -373,7 +373,10 @@ toShakeRules a = buildShakeRules $ cacheBuild a
 
 -- | Run the cached computation using shake. If you use the result of this function as your program's main, you can pass shake options as arguments. Try "my-program --help"
 runShake :: Cached a -> IO ()
-runShake a = shakeArgs shakeOptions{shakeThreads=0} (toShakeRules a)
+runShake a = shakeArgs shakeOptions{ shakeThreads=0
+                                   , shakeChange=ChangeModtimeAndDigest
+                                   , shakeColor=True}
+                       ( toShakeRules a )
 
 -- ** Pretty printing
 

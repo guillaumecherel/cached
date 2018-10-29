@@ -62,7 +62,7 @@ testFile path content = do
 runClean :: FilePath -> Cached a -> IO ()
 runClean dir x = do
   rmRec dir
-  shakeGo dir $ buildCache x
+  shakeGo dir $ toShakeRules x
 
   
 -- Test function application.
@@ -78,13 +78,13 @@ testFunAp dir touch (expectedA, expectedFA) = once $ ioProperty $ do
 
   -- Build "a" once
   shakeGo dir $ do
-    buildCache $ f 1 (a 1)
+    toShakeRules $ f 1 (a 1)
 
   touch
 
   -- Build cache
   shakeGo dir $ do
-    buildCache $ f 2 (a 2)
+    toShakeRules $ f 2 (a 2)
 
   -- Test the cache files
   testA <- testFile (dir </> "a") expectedA
@@ -107,7 +107,7 @@ prop_SinValCreaCache = ioProperty $ do
   rmRec "test-output/formulas/Util/Cached/SinValCreaCache"
 
   -- Build the cache
-  shakeGo "test-output/formulas/Util/Cached/SinValCreaCache/" $ buildCache a
+  shakeGo "test-output/formulas/Util/Cached/SinValCreaCache/" $ toShakeRules a
 
   -- Test if the file was written and contains the appropriate value
   testFile "test-output/formulas/Util/Cached/SinValCreaCache/a" "1"
@@ -122,10 +122,10 @@ prop_SinValNoRecomp = ioProperty $ do
   rmRec "test-output/formulas/Util/Cached/SinValNoRecomp"
 
   -- Build the cache once.
-  shakeGo "test-output/formulas/Util/Cached/SinValNoRecomp" $ buildCache (a 1)
+  shakeGo "test-output/formulas/Util/Cached/SinValNoRecomp" $ toShakeRules (a 1)
 
   -- Rebuild, changing the value.
-  shakeGo "test-output/formulas/Util/Cached/SinValNoRecomp" $ buildCache (a 2)
+  shakeGo "test-output/formulas/Util/Cached/SinValNoRecomp" $ toShakeRules (a 2)
 
   -- Test if the file was written and contains the appropriate value
   testFile "test-output/formulas/Util/Cached/SinValNoRecomp/a" "1"
@@ -140,14 +140,14 @@ prop_SinValRecomp = ioProperty $ do
   rmRec  "test-output/formulas/Util/Cached/SinValRecomp"
 
   -- Build the cache once.
-  shakeGo "test-output/formulas/Util/Cached/SinValRecomp" $ buildCache (a 1)
+  shakeGo "test-output/formulas/Util/Cached/SinValRecomp" $ toShakeRules (a 1)
 
   -- Modify the cache file. (delay to make sure the file modification date is different)
   threadDelay 5000
   writeFile "test-output/formulas/Util/Cached/SinValRecomp/a" "2"
 
   -- Rebuild, changing the value.
-  shakeGo "test-output/formulas/Util/Cached/SinValRecomp/" $ buildCache (a 3)
+  shakeGo "test-output/formulas/Util/Cached/SinValRecomp/" $ toShakeRules (a 3)
 
   -- Test if the file was written and contains the appropriate value
   testFile "test-output/formulas/Util/Cached/SinValRecomp/a" "3"
@@ -268,7 +268,7 @@ prop_FunApCompAllFunctor = once $ ioProperty $ do
 
   -- Build cache
   shakeGo "test-output/formulas/Util/Cached/FunApCompAllFunctor/" $ do
-    buildCache fa
+    toShakeRules fa
 
   -- Test the cache files
   testA <- testFile "test-output/formulas/Util/Cached/FunApCompAllFunctor/a" "1"
