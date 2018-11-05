@@ -1,8 +1,8 @@
 {-| This module lets you cache values to disk to avoid re-running (potentially
     long) computations between consecutive executions of your
     program. Cached values are recomputed only when needed, i.e. when
-    other cached values on which they depend change. Independant
-    computations can be run in parallel for free. It offers convenient
+    other cached values on which they depend change. Independent
+    computations are run in parallel. It offers convenient
     fonctions for caching to text files, but caching and uncaching using
     arbitrary IO actions is also possible.
 
@@ -14,7 +14,7 @@
 
     = Usage
 
-    A value of type "Cached a" should be understood as a value of type "a" that is read from a file, or that is produced from data stored in one or more files, or even from arbitrary IO actions.
+    A value of type "Cached a" should be understood as a value of type "a" that is read from a file, or that is produced from data stored in one or more files, or from arbitrary IO actions.
 
     Cached values can be created from pure values,
 
@@ -83,7 +83,7 @@ Cached Build:
     /tmp/cached-ex/a
     /tmp/cached-ex/b
 
-    The previous output means that the value carried by "c'" is 4, and that in order to be build, it needs the file "\/tmp\/cached-ex\/c". The last field, "Cached Build", lists each file that is to be built by the cache system and their dependencies: "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/c"
+    The previous output means that the value carried by "c'" is 4, and that in order to be computed, it needs the file "\/tmp\/cached-ex\/c". The last field, "Cached Build", lists each file that is to be built by the cache system and their dependencies: "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/c"
     are created by the cache system, and the latter depends on
     "\/tmp\/cache-ex\/a" and "\/tmp\/cache-ex\/b"
 
@@ -107,11 +107,12 @@ Cached Build:
 module Data.Cached (
   -- * Cached type
     Cached
+  , getValue
   -- * Creation
   -- $creation
-  , fromIO
   , source
   , source'
+  , fromIO
   -- * Caching values
   -- $caching
   , cache
@@ -136,128 +137,20 @@ import qualified Data.Set as Set
 import Data.Text
 import Development.Shake
 
+import Data.Cached.Internal
+
 -- $setup
 -- >>> :set -XOverloadedStrings
+-- >>> import Prelude (read)
 
 
 -- * Cached
 
--- |A value that is produced from files on disk.
-data Cached a = Cached { cacheRead :: ExceptT Text IO a
-                       , cacheNeeds :: Set FilePath
-                       , cacheBuild :: Build }
-              | CacheFail Text
+-- | Extract the value cached value.
+getValue :: Cached a -> IO (Either Text a)
+getValue (CacheFail err) = return (Left err)
+getValue (Cached a _ _) = runExceptT a
 
-instance Functor Cached where
-  fmap _ (CacheFail err) = CacheFail err
-  fmap f (Cached r n b) = Cached (fmap f r) n b
-
-instance Applicative Cached where
-  pure a = Cached (return a) mempty mempty
-
-  (CacheFail err) <*> _ = CacheFail err
-  _ <*> (CacheFail err) = CacheFail err
-  f <*> a = Cached ( cacheRead f <*> cacheRead a )
-                  ( cacheNeeds f <> cacheNeeds a )
-                  (  cacheBuild f <> cacheBuild a )
-
-instance (Semigroup a) => Semigroup (Cached a) where
-  (CacheFail err) <> _ = CacheFail err
-  _ <> (CacheFail err) = CacheFail err
-  (Cached cr1 cn1 cb1) <> (Cached cr2 cn2 cb2) =
-    Cached { cacheRead = liftA2 (<>) cr1 cr2
-          , cacheNeeds = cn1 <> cn2
-          , cacheBuild = cb1 <> cb2 }
-
-instance (Monoid a) => Monoid (Cached a) where
-  mempty = Cached (return mempty) mempty mempty
-
-instance Num a => Num (Cached a) where
-    fromInteger = pure . fromInteger
-    {-# INLINE fromInteger #-}
-
-    negate = fmap negate
-    {-# INLINE negate #-}
-
-    abs = fmap abs
-    {-# INLINE abs #-}
-
-    signum = fmap signum
-    {-# INLINE signum #-}
-
-    (+) = liftA2 (+)
-    {-# INLINE (+) #-}
-
-    (*) = liftA2 (*)
-    {-# INLINE (*) #-}
-
-    (-) = liftA2 (-)
-    {-# INLINE (-) #-}
-
-instance Fractional a => Fractional (Cached a) where
-    fromRational = pure . fromRational
-    {-# INLINE fromRational #-}
-
-    recip = fmap recip
-    {-# INLINE recip #-}
-
-    (/) = liftA2 (/)
-    {-# INLINE (/) #-}
-
-instance Floating a => Floating (Cached a) where
-    pi = pure pi
-    {-# INLINE pi #-}
-
-    exp = fmap exp
-    {-# INLINE exp #-}
-
-    sqrt = fmap sqrt
-    {-# INLINE sqrt #-}
-
-    log = fmap log
-    {-# INLINE log #-}
-
-    sin = fmap sin
-    {-# INLINE sin #-}
-
-    tan = fmap tan
-    {-# INLINE tan #-}
-
-    cos = fmap cos
-    {-# INLINE cos #-}
-
-    asin = fmap asin
-    {-# INLINE asin #-}
-
-    atan = fmap atan
-    {-# INLINE atan #-}
-
-    acos = fmap acos
-    {-# INLINE acos #-}
-
-    sinh = fmap sinh
-    {-# INLINE sinh #-}
-
-    tanh = fmap tanh
-    {-# INLINE tanh #-}
-
-    cosh = fmap cosh
-    {-# INLINE cosh #-}
-
-    asinh = fmap asinh
-    {-# INLINE asinh #-}
-
-    atanh = fmap atanh
-    {-# INLINE atanh #-}
-
-    acosh = fmap acosh
-    {-# INLINE acosh #-}
-
-    (**) = liftA2 (**)
-    {-# INLINE (**) #-}
-
-    logBase = liftA2 logBase
-    {-# INLINE logBase #-}
 
 -- $creation To create cached values from pure values, use 'pure'.
 --
@@ -275,10 +168,6 @@ instance Floating a => Floating (Cached a) where
 -- The following functions offer additionnal creation possibilities.
 --
 
--- | Create a cached value from an IO action that depends on some input files.
-fromIO :: Set FilePath -> IO a -> Cached a
-fromIO needs io = Cached (lift io) needs mempty
-
 -- | Create a cached value from an input file.
 source :: FilePath -> (Text -> Either Text a) -> Cached a
 source path fromText = Cached
@@ -292,6 +181,14 @@ source' :: (Read a) => FilePath -> Cached a
 source' path = source path fromText
   where fromText = bimap pack identity . readEither . unpack
 
+-- | Create a cached value from an IO action that depends on some input files.
+fromIO :: Set FilePath -> IO a -> Cached a
+fromIO needs io = Cached (lift io) needs mempty
+
+
+-- $caching
+-- These functions associate cached values to files on disk or IO actions.
+
 -- | Associate a cached value to a file on disk.
 cache :: FilePath -> (a -> Text) -> (Text -> Either Text a) -> Cached a
       -> Cached a
@@ -299,16 +196,12 @@ cache path toText fromText = cacheIO path
                                      ( writeFile path . toText )
                                      ( fromText <$> readFile path )
 
--- $caching
--- These functions associate cached values to files on disk or IO actions.
-
 -- | A convenient variant of 'cache' when the type of the value to be read is
 -- an instance of 'Read' and 'Show'.
 cache' :: (Show a, Read a) => FilePath -> Cached a -> Cached a
 cache' path = cache path show (bimap pack identity . readEither . unpack)
 
--- | Caching with arbitrary IO actions (e.g.) writing to and reading from a
--- database).
+-- | Caching with arbitrary IO actions.
 cacheIO :: FilePath -> (a -> IO ()) -> (IO (Either Text a)) -> Cached a
         -> Cached a
 cacheIO _ _ _ (CacheFail err) = CacheFail err
@@ -371,11 +264,10 @@ toShakeRules :: Cached a -> Rules ()
 toShakeRules (CacheFail err) = action $ fail $ unpack err
 toShakeRules a = buildShakeRules $ cacheBuild a
 
--- | Run the cached computation using shake. If you use the result of this function as your program's main, you can pass shake options as arguments. Try "my-program --help"
+-- | Run the cached computation using shake (see <shakebuild.com>, "Development.Shake"). If you use the result of this function as your program's main, you can pass shake options as arguments. Try "my-program --help"
 runShake :: Cached a -> IO ()
 runShake a = shakeArgs shakeOptions{ shakeThreads=0
-                                   , shakeChange=ChangeModtimeAndDigest
-                                   , shakeColor=True}
+                                   , shakeChange=ChangeModtimeAndDigest }
                        ( toShakeRules a )
 
 -- ** Pretty printing
@@ -391,48 +283,4 @@ prettyCached (Cached r n b) = do
                        <> foldMap (\p -> "  " <> pack p <> "\n") n
                        <> "Cached Build: \n"
                        <> (unlines $ fmap ("  " <>) (lines $ prettyBuild b))
-
-
--- * Build
-
-newtype Build = Build (Map FilePath (ExceptT Text IO (), Set FilePath))
-
-instance Semigroup Build where
-  (Build a) <> (Build b) = Build (a <> b)
-
-instance Monoid Build where
-  mempty = Build Map.empty
-
-isBuilt :: FilePath -> Build -> Bool
-isBuilt p (Build m) = Map.member p m
-
-buildSingle :: FilePath -> ExceptT Text IO () -> Set FilePath -> Build
-buildSingle path write needs = Build $ Map.singleton path (write, needs)
-
-buildList :: Build -> [(FilePath, ExceptT Text IO (), Set FilePath)]
-buildList (Build m) = fmap (\(a, (b, c)) -> (a,b,c)) (Map.toList m)
-
-buildTargets :: Build -> [FilePath]
-buildTargets (Build m) = Map.keys m
-
-buildShakeRules :: Build -> Rules ()
-buildShakeRules b = do
-            want (buildTargets b)
-            foldMap buildOne ( buildList b )
-  where buildOne (outPath, write, needs) =
-                    outPath %> \_ -> do
-                      Development.Shake.need (Set.toList needs)
-                      e <- traced "Writing cache" $ runExceptT write
-                      case e of
-                        Right () -> return ()
-                        Left err -> fail $ unpack err
-
-prettyBuild :: Build -> Text
-prettyBuild (Build a) = foldMap showOne $ Map.toList a
-  where showOne :: (FilePath, (ExceptT Text IO (), Set FilePath)) -> Text
-        showOne (target, (_, needs)) =
-             pack target <> "\n"
-          <> (unlines $ fmap (\n -> "  " <> pack n) $ Set.toList needs)
-
-
 

@@ -8,15 +8,20 @@ module Test.Data.Cached where
 
 import Protolude
 
+import qualified Data.List as List
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Text
 import Data.Text.Read
 import Development.Shake
 import Development.Shake.FilePath
 import System.Directory
 import Test.QuickCheck
+import Test.QuickCheck.Assertions
 import Test.Util
 
-import Data.Cached as Cached
+import Data.Cached
+import Data.Cached.Internal
 
 readInt :: Text -> Either Text Int
 readInt = bimap pack fst . signed decimal
@@ -33,16 +38,7 @@ shakeGo testDir = shakeArgs shakeOptions
   , shakeFiles = testDir </> ".shake/"
   }
 
--- Make sure the given file does not exist, delete if necessary.
-rmFile :: FilePath -> IO ()
-rmFile f = do
-    System.Directory.doesFileExist f
-    >>= bool (return ()) (removeFile f)
-
--- Make sure the given directory does not exist, delete recursively if necessary.
-rmRec:: FilePath -> IO ()
-rmRec dir = removePathForcibly dir
-
+ 
 -- Test that a file exists and contains the appropriate value.
 testFile :: FilePath -> Text -> IO Property
 testFile path content = do
@@ -64,7 +60,6 @@ runClean dir x = do
   rmRec dir
   shakeGo dir $ toShakeRules x
 
-  
 -- Test function application.
 testFunAp :: FilePath -> IO () -> (Text, Text) ->  Property
 testFunAp dir touch (expectedA, expectedFA) = once $ ioProperty $ do
@@ -306,6 +301,190 @@ prop_ApplicativeCacheTwice = ioProperty $ do
   testFile "test-output/formulas/Util/Cached/Applicative/CacheTwice/a" "1"
 
 
+---- Interface functions examples
+
+prop_source :: SimplePath -> Either Text Int -> Property
+prop_source (SimplePath p) es =
+  let dir="test-output/formulas/Util/Cached/Interface/source"
+      path = dir </> p
+      c = source path (bimap pack identity . readEither . unpack)
+      -- to cover the case when es is (Left t) and t represents an Int
+      es' = case es of
+                      Left t -> case readMaybe (unpack t) of
+                                  Nothing -> es
+                                  Just anInt -> Right anInt
+                      _ -> es
+  in ioProperty $ do
+    setDir dir [(path, case es of Right i -> show i; Left t -> t)]
+    ev <- getValue c
+    return $ counterexample (show (ev, es')) $ case (ev, es') of
+      (Left errv, Left _ ) -> errv == "Prelude.read: no parse"
+      (Right v, Right s) -> v == s
+      _ -> False
+
+prop_source' :: SimplePath -> Either Text Int -> Property
+prop_source' (SimplePath p) es =
+  let dir="test-output/formulas/Util/Cached/Interface/source'"
+      path = dir </> p
+  in ioProperty $ do
+    setDir dir [(path, case es of Right i -> show i; Left t -> t)]
+    eqCached (source' path :: Cached Int)
+             (source path (bimap pack identity . readEither . unpack) :: Cached Int)
+
+prop_fromIO :: DirectoryTree -> InfiniteList Text -> Property
+prop_fromIO dt (InfiniteList infTexts _) =
+  let dir="test-output/formulas/Util/Cached/Interface/fromIO"
+      paths = fmap (dir </>) (directoryTreePaths dt)
+      texts = List.take (List.length paths) infTexts
+      c = fromIO (Set.fromList paths) (foldMap readFile paths)
+  in ioProperty $ do
+    setDir dir (Protolude.zip paths texts)
+    e <- getValue $ liftA2 (==) c (pure $ mconcat texts)
+    return $ case e of
+      Left _ -> False
+      Right b -> b
+
+prop_cache :: Property
+prop_cache = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/cache"
+      c1 = cache ( dir </> "c1" )
+                 show
+                 (bimap pack identity . readEither . unpack)
+                 ( pure 1 ) :: Cached Int
+      c2 = cache ( dir </> "c2" ) 
+                 show
+                 (bimap pack identity . readEither . unpack)
+                 ( pure 2 ) :: Cached Int
+      c3 = cache ( dir </> "c3" ) 
+                 show
+                 (bimap pack identity . readEither . unpack)
+                 ( c1 + c2 ) :: Cached Int
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached c1 (Right 1) (Set.singleton $ dir </> "c1")
+               (Map.fromList [(dir </> "c1", (Right "1", mempty))])
+    test2 <- testCached c3 (Right 3) (Set.singleton $ dir </> "c3")
+               (Map.fromList [(dir </> "c3", (Right "3", Set.fromList [dir </> "c1"
+                                                         ,dir </> "c2"]))
+                             ,(dir </> "c2", (Right "2", mempty))
+                             ,(dir </> "c1", (Right "1", mempty))])
+    return $ test1 .&&. test2
+
+prop_cache' :: Property
+prop_cache' = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/cache'"
+      c1 = cache' ( dir </> "c1" ) ( pure 1 ) :: Cached Int
+      c2 = cache' ( dir </> "c2" ) ( pure 2 ) :: Cached Int
+      c3 = cache' ( dir </> "c3" ) ( c1 + c2 ) :: Cached Int
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached c1 (Right 1) (Set.singleton $ dir </> "c1")
+               (Map.fromList [(dir </> "c1", (Right "1", mempty))])
+    test2 <- testCached c3 (Right 3) (Set.singleton $ dir </> "c3")
+               (Map.fromList [(dir </> "c3", (Right "3", Set.fromList [dir </> "c1"
+                                                         ,dir </> "c2"]))
+                             ,(dir </> "c2", (Right "2", mempty))
+                             ,(dir </> "c1", (Right "1", mempty))])
+    return $ test1 .&&. test2
+
+
+prop_cacheIO :: Property
+prop_cacheIO = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/cacheIO"
+      c1 = cacheIO ( dir </> "c1" )
+                  ( writeFile (dir </> "c1") . show )
+                  ( bimap pack identity . readEither . unpack
+                    <$> readFile (dir </> "c1") )
+                  ( pure 1 ) :: Cached Int
+      c2 = cacheIO ( dir </> "c2" )
+                  ( writeFile (dir </> "c2") . show )
+                  ( bimap pack identity . readEither . unpack
+                    <$> readFile (dir </> "c2") )
+                  ( pure 2 ) :: Cached Int
+      c3 = cacheIO ( dir </> "c3" )
+                  ( writeFile (dir </> "c3") . show )
+                  ( bimap pack identity . readEither . unpack
+                    <$> readFile (dir </> "c3") )
+                  ( c1 + c2 ) :: Cached Int
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached c1 (Right 1) (Set.singleton $ dir </> "c1")
+               (Map.fromList [(dir </> "c1", (Right "1", mempty))])
+    test2 <- testCached c3 (Right 3) (Set.singleton $ dir </> "c3")
+               (Map.fromList [(dir </> "c3", (Right "3", Set.fromList [dir </> "c1"
+                                                         ,dir </> "c2"]))
+                             ,(dir </> "c2", (Right "2", mempty))
+                             ,(dir </> "c1", (Right "1", mempty))])
+    return $ test1 .&&. test2
+
+prop_sink :: Property
+prop_sink = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/sink"
+      c1 = cache' ( dir </> "c1" ) ( pure 1 ) :: Cached Int
+      c2 = cache' ( dir </> "c2" ) ( pure 2 ) :: Cached Int
+      s1 = sink ( dir </> "s1" ) (Right . show) ( pure (1 :: Int) )
+      s2 = sink ( dir </> "s2" ) (Right . show) ( c1 + c2 )
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached s1 (Right ()) mempty
+               (Map.fromList [(dir </> "s1", (Right "1", mempty))])
+    test2 <- testCached s2 (Right ()) mempty
+               (Map.fromList [(dir </> "s2", (Right "3", Set.fromList [dir </> "c1"
+                                                         ,dir </> "c2"]))
+                             ,(dir </> "c2", (Right "2", mempty))
+                             ,(dir </> "c1", (Right "1", mempty))])
+    return $ test1 .&&. test2
+
+prop_sink' :: Property
+prop_sink' = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/sink'"
+      c1 = cache' ( dir </> "c1" ) ( pure 1 ) :: Cached Int
+      c2 = cache' ( dir </> "c2" ) ( pure 2 ) :: Cached Int
+      s1 = sink' ( dir </> "s1" ) (pure 1):: Cached ()
+      s2 = sink' ( dir </> "s2" ) (c1 + c2) :: Cached ()
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached s1 (Right ()) mempty
+               (Map.fromList [(dir </> "s1", (Right "1", mempty))])
+    test2 <- testCached s2 (Right ()) mempty
+               (Map.fromList [(dir </> "s2", (Right "3", Set.fromList [dir </> "c1"
+                                                         ,dir </> "c2"]))
+                             ,(dir </> "c2", (Right "2", mempty))
+                             ,(dir </> "c1", (Right "1", mempty))])
+    return $ test1 .&&. test2
+
+prop_sinkIO :: Property
+prop_sinkIO = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/sinkIO"
+      c1 = cache' ( dir </> "c1" ) ( pure 1 ) :: Cached Int
+      c2 = cache' ( dir </> "c2" ) ( pure 2 ) :: Cached Int
+      s1 = sinkIO ( dir </> "s1" )
+                  ( fmap Right . writeFile (dir </> "s1") . show )
+                  (pure 1):: Cached ()
+      s2 = sinkIO ( dir </> "s2" )
+                  ( fmap Right . writeFile (dir </> "s2") . show )
+                  (c1 + c2) :: Cached ()
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached s1 (Right ()) mempty
+               (Map.fromList [(dir </> "s1", (Right "1", mempty))])
+    test2 <- testCached s2 (Right ()) mempty
+               (Map.fromList [(dir </> "s2", (Right "3", Set.fromList [dir </> "c1"
+                                                         ,dir </> "c2"]))
+                             ,(dir </> "c2", (Right "2", mempty))
+                             ,(dir </> "c1", (Right "1", mempty))])
+    return $ test1 .&&. test2
+
+prop_trigger :: Property
+prop_trigger = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/trigger"
+      c = trigger ( dir </> "c" )
+                  ( Right <$> writeFile (dir </> "c") "1" )
+                  ( Set.fromList [dir </> "a"] )
+  in ioProperty $ do
+    setDir dir []
+    testCached c (Right ()) mempty
+               (Map.fromList [(dir </> "s1", (Right "1", (Set.fromList [dir </> "a"])))])
 
 runTests = do
   checkOrExit "prop_SinValCreaCache" prop_SinValCreaCache
@@ -323,4 +502,14 @@ runTests = do
   checkOrExit "prop_FunApCompAllFunctor" prop_FunApCompAllFunctor
   checkOrExit "prop_MonoidCacheTwice" prop_MonoidCacheTwice
   checkOrExit "prop_ApplicativeCacheTwice" prop_ApplicativeCacheTwice
+  checkOrExit "prop_source" prop_source
+  checkOrExit "prop_source'" prop_source'
+  checkOrExit "prop_fromIO" prop_fromIO
+  checkOrExit "prop_cache" prop_cache
+  checkOrExit "prop_cache'" prop_cache'
+  checkOrExit "prop_cacheIO" prop_cacheIO
+  checkOrExit "prop_sink" prop_sink
+  checkOrExit "prop_sink'" prop_sink'
+  checkOrExit "prop_sinkIO" prop_sinkIO
+  checkOrExit "prop_trigger" prop_trigger
 
