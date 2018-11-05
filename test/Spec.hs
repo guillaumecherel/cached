@@ -1,4 +1,10 @@
+import Test.DocTest
 import Test.Data.Cached (runTests)
 
 main :: IO ()
-main = runTests
+main = do
+  putStrLn "---- QuickCheck"
+  runTests
+  putStrLn "---- DocTest"
+  doctest [ "src/Data/Cached.hs"
+          , "src/Data/Cached/Internal.hs"]
