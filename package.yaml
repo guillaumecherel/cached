@@ -11,8 +11,8 @@ extra-source-files:
 - ChangeLog.md
 
 # Metadata used when publishing your package
-# synopsis:            Write data flows that cache values to disk. Run independant computations in parallel and only recompute what needs to be.
-# category:            Workflow, Data Flow
+synopsis:            Write data flows that cache values to disk. Run independant computations in parallel and only recompute what needs to be.
+category:            Workflow, Data Flow
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
