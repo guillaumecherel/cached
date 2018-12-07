@@ -160,7 +160,7 @@ buildShakeRules b = do
                       e <- traced "Writing cache" $ runExceptT write
                       case e of
                         Right () -> return ()
-                        Left err -> fail $ unpack err
+                        Left err -> fail $ "Error running shake rule building file " <> outPath <> "depending on " <> show needs <> "\nError message: "<> unpack err
 
 prettyBuild :: Build -> Text
 prettyBuild (Build a) = foldMap showOne $ Map.toList a
