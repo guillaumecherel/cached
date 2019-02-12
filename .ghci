@@ -1,0 +1,5 @@
+:set -fno-code
+:set -fwarn-unused-binds -fwarn-unused-imports
+:set -isrc
+:load Data.Cached
+:load Data.Cached.Internal

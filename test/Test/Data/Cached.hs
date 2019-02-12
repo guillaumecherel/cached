@@ -318,7 +318,7 @@ prop_source (SimplePath p) es =
     setDir dir [(path, case es of Right i -> show i; Left t -> t)]
     ev <- getValue c
     return $ counterexample (show (ev, es')) $ case (ev, es') of
-      (Left errv, Left _ ) -> errv == "Prelude.read: no parse"
+      (Left errv, Left _ ) -> errv == "Error reading file " <> pack path <> ": Prelude.read: no parse"
       (Right v, Right s) -> v == s
       _ -> False
 

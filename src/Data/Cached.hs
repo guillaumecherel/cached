@@ -132,10 +132,9 @@ module Data.Cached (
 import Protolude
 
 import Control.Monad.Fail
-import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text
-import Development.Shake
+import qualified Development.Shake as Shake
 
 import Data.Cached.Internal
 
@@ -171,9 +170,10 @@ getValue (Cached a _ _) = runExceptT a
 -- | Create a cached value from an input file.
 source :: FilePath -> (Text -> Either Text a) -> Cached a
 source path fromText = Cached
-  { cacheRead = ExceptT $ fromText <$> readFile path
+  { cacheRead = ExceptT $ first errMsg . fromText <$> readFile path
   , cacheNeeds = Set.singleton path
   , cacheBuild = mempty }
+  where errMsg e = "Error reading file " <> pack path <> ": " <> e
 
 -- | A convenient variant of 'source' when the type of the value to be read
 -- instantiates 'Read'.
@@ -207,12 +207,13 @@ cacheIO :: FilePath -> (a -> IO ()) -> (IO (Either Text a)) -> Cached a
 cacheIO _ _ _ (CacheFail err) = CacheFail err
 cacheIO path write read a = if isBuilt path (cacheBuild a)
   then CacheFail ("The cache file already exists: " <> pack path)
-  else Cached { cacheRead = ExceptT read
+  else Cached { cacheRead = ExceptT $ (fmap . first) errMsg $ read
               , cacheNeeds = Set.singleton path
               , cacheBuild = buildSingle path
                                ( cacheRead a >>= lift . write )
                                ( cacheNeeds a )
                           <> cacheBuild a }
+  where errMsg e = "Error reading file " <> pack path <> ": " <> e
 
 -- | Associate a cached value to a file on disk without the possibility
 -- to read it back. Useful for storing to a text file the final result of a
@@ -260,15 +261,16 @@ trigger path action needs = sinkIO path (\_ -> action) (fromIO needs (return ())
 -- ** Building
 
 -- | Get shake 'Rules'. Those can be mixed together with other shake rules.
-toShakeRules :: Cached a -> Rules ()
-toShakeRules (CacheFail err) = action $ fail $ unpack err
+toShakeRules :: Cached a -> Shake.Rules ()
+toShakeRules (CacheFail err) = Shake.action $ fail $ unpack err
 toShakeRules a = buildShakeRules $ cacheBuild a
 
 -- | Run the cached computation using shake (see <shakebuild.com>, "Development.Shake"). If you use the result of this function as your program's main, you can pass shake options as arguments. Try "my-program --help"
 runShake :: Cached a -> IO ()
-runShake a = shakeArgs shakeOptions{ shakeThreads=0
-                                   , shakeChange=ChangeModtimeAndDigest }
-                       ( toShakeRules a )
+runShake a = Shake.shakeArgs Shake.shakeOptions
+               { Shake.shakeThreads=0
+               , Shake.shakeChange=Shake.ChangeModtimeAndDigest }
+               ( toShakeRules a )
 
 -- ** Pretty printing
 
