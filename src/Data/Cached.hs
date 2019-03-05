@@ -1,18 +1,4 @@
-{-| This module lets you cache values to disk to avoid re-running (potentially
-    long) computations between consecutive executions of your
-    program. Cached values are recomputed only when needed, i.e. when
-    other cached values on which they depend change. Independent
-    computations are run in parallel. It offers convenient
-    fonctions for caching to text files, but caching and uncaching using
-    arbitrary IO actions is also possible.
-
-    The module was motivated by writing scientific data flows, simulation
-    experiments or data science scripts. Those often involve long
-    computations and create "flows" where the output of some computation
-    are the inputs of others, until final results are produced (values,
-    figures, statistical tests, etc.).
-
-    = Usage
+{-| = Usage
 
     A value of type "Cached a" should be understood as a value of type "a" that is read from a file, or that is produced from data stored in one or more files, or from arbitrary IO actions.
 
