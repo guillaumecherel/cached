@@ -1,0 +1,93 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 5acec68f42bf0a5152fdd140c07a4689fe874205190d636168eed98b22cadcde
+
+name:           cached
+version:        0.1.0.0
+synopsis:       Cache values to disk.
+category:       Workflow, Data Flow
+description:
+  The module `Data.Cached` lets you cache values to disk to avoid re-running
+  (potentially long) computations between consecutive executions of your
+  program. Cached values are recomputed only when needed, i.e. when other
+  cached values on which they depend change. Independent computations are
+  run in parallel. It offers convenient fonctions for caching to text files,
+  but caching and uncaching using arbitrary IO actions is also possible.
+  .
+  The module was motivated by writing scientific data flows, simulation
+  experiments or data science scripts. Those often involve long
+  computations and create "flows" where the output of some computation
+  are the inputs of others, until final results are produced (values,
+  figures, statistical tests, etc.).
+  .
+  See the module "Data.Cached" documentation:
+homepage:       https://github.com/guillaumecherel/cached#readme
+bug-reports:    https://github.com/guillaumecherel/cached/issues
+author:         Guillaume Chérel
+maintainer:     guillaume.cherel@iscpif.fr
+copyright:      2018 Guillaume Chérel
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/guillaumecherel/cached
+
+library
+  exposed-modules:
+      Data.Cached
+      Data.Cached.Internal
+  other-modules:
+  hs-source-dirs:
+      src
+  ghc-options: -Wall
+  build-depends:
+      base >=4.7 && <5
+    , containers >= 0.5.10
+    , protolude >= 0.2.2
+    , shake >= 0.16.4
+    , text >= 1.2.3
+  default-language: Haskell2010
+
+-- executable cached-exe
+--   main-is: Main.hs
+--   other-modules:
+--       Paths_cached
+--   hs-source-dirs:
+--       app
+--   ghc-options: -threaded -rtsopts -with-rtsopts=-N
+--   build-depends:
+--       base >=4.7 && <5
+--     , cached
+--   default-language: Haskell2010
+
+test-suite cached-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Test.Data.Cached
+      Test.Util
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , cached -any
+    , containers >= 0.5.10
+    , directory >= 1.3.1
+    , doctest >= 0.16.0
+    , filepath >= 1.4.2
+    , protolude >= 0.2.2
+    , QuickCheck >= 2.11.3
+    , quickcheck-assertions >= 0.3.0
+    , shake >= 0.16.4
+    , text >= 1.2.3
+  default-language: Haskell2010
