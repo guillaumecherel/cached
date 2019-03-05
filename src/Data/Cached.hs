@@ -47,17 +47,17 @@
 >>> :!rm -f /tmp/cached-ex/*
 >>> :!echo 2 > /tmp/cached-ex/b
 >>>
->>> runShake c'
+>>> runShake "/tmp/cached-ex/.shake" c'
 # Writing cache (for /tmp/cached-ex/a)
 # Writing cache (for /tmp/cached-ex/c)
-Build completed in 0:01m
+Build completed ...
 ...
 
     Running it again won't run anything. Since none of the cached or
     source files have changed, there is nothing to re-compute.
 
->>> runShake c'
-Build completed in 0:01m
+>>> runShake "/tmp/cached-ex/.shake" c'
+Build completed ...
 ...
 
     If we modify the content of "\/tmp\/cached-ex\/b", running "c'"
@@ -65,9 +65,9 @@ Build completed in 0:01m
     since it does not depend on "b".
 
 >>> :! echo 3 > /tmp/cached-ex/b
->>> runShake c'
+>>> runShake "/tmp/cached-ex/.shake" c'
 # Writing cache (for /tmp/cached-ex/c)
-Build completed in 0:01m
+Build completed ...
 ...
 
     The cache files and dependencies can be inspected with
@@ -266,9 +266,10 @@ toShakeRules (CacheFail err) = Shake.action $ fail $ unpack err
 toShakeRules a = buildShakeRules $ cacheBuild a
 
 -- | Run the cached computation using shake (see <shakebuild.com>, "Development.Shake"). If you use the result of this function as your program's main, you can pass shake options as arguments. Try "my-program --help"
-runShake :: Cached a -> IO ()
-runShake a = Shake.shakeArgs Shake.shakeOptions
-               { Shake.shakeThreads=0
+runShake :: FilePath -> Cached a -> IO ()
+runShake shakeFiles a = Shake.shakeArgs Shake.shakeOptions
+               { Shake.shakeFiles = shakeFiles
+               , Shake.shakeThreads=0
                , Shake.shakeChange=Shake.ChangeModtimeAndDigest }
                ( toShakeRules a )
 
