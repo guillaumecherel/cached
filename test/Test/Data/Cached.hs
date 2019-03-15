@@ -422,8 +422,8 @@ prop_sink = once $
   let dir = "test-output/formulas/Util/Cached/Interface/sink"
       c1 = cache' ( dir </> "c1" ) ( pure 1 ) :: Cached Int
       c2 = cache' ( dir </> "c2" ) ( pure 2 ) :: Cached Int
-      s1 = sink ( dir </> "s1" ) (Right . show) ( pure (1 :: Int) )
-      s2 = sink ( dir </> "s2" ) (Right . show) ( c1 + c2 )
+      s1 = sink ( dir </> "s1" ) show ( pure (1 :: Int) )
+      s2 = sink ( dir </> "s2" ) show ( c1 + c2 )
   in ioProperty $ do
     setDir dir []
     test1 <- testCached s1 (Right ()) mempty
@@ -459,10 +459,10 @@ prop_sinkIO = once $
       c1 = cache' ( dir </> "c1" ) ( pure 1 ) :: Cached Int
       c2 = cache' ( dir </> "c2" ) ( pure 2 ) :: Cached Int
       s1 = sinkIO ( dir </> "s1" )
-                  ( fmap Right . writeFile (dir </> "s1") . show )
+                  ( writeFile (dir </> "s1") . show )
                   (pure 1):: Cached ()
       s2 = sinkIO ( dir </> "s2" )
-                  ( fmap Right . writeFile (dir </> "s2") . show )
+                  ( writeFile (dir </> "s2") . show )
                   (c1 + c2) :: Cached ()
   in ioProperty $ do
     setDir dir []
@@ -479,7 +479,7 @@ prop_trigger :: Property
 prop_trigger = once $
   let dir = "test-output/formulas/Util/Cached/Interface/trigger"
       c = trigger ( dir </> "c" )
-                  ( Right <$> writeFile (dir </> "c") "1" )
+                  ( writeFile (dir </> "c") "1" )
                   ( Set.fromList [dir </> "a"] )
   in ioProperty $ do
     setDir dir []

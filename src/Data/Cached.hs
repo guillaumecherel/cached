@@ -205,24 +205,24 @@ cacheIO path write read a = if isBuilt path (cacheBuild a)
 -- to read it back. Useful for storing to a text file the final result of a
 -- computation that doesn't need to be read again, like data for producing
 -- figures, text output, etc.
-sink :: FilePath -> (a -> Either Text Text) -> Cached a -> Cached ()
+sink :: FilePath -> (a -> Text) -> Cached a -> Cached ()
 sink path toText = sinkIO path write
-  where write = traverse (writeFile path) . toText
+  where write = writeFile path . toText
 
 -- | A convenient variant of 'sink' when the written value type instantiates
 -- 'Show'.
 sink' :: (Show a) => FilePath -> Cached a -> Cached ()
-sink' path = sink path (return . show)
+sink' path = sink path show
 
 -- | Sink with an arbitrary IO action.
-sinkIO :: FilePath -> (a -> IO (Either Text ())) -> Cached a -> Cached ()
+sinkIO :: FilePath -> (a -> IO ()) -> Cached a -> Cached ()
 sinkIO _ _ (CacheFail err) = CacheFail err
 sinkIO path write a = if isBuilt path (cacheBuild a)
   then CacheFail ("The cache file already exists: " <> pack path)
   else Cached { cacheRead = return ()
               , cacheNeeds = mempty
               , cacheBuild = buildSingle path
-                                         (cacheRead a >>= ExceptT . write)
+                                         (cacheRead a >>= lift . write)
                                          (cacheNeeds a)
                           <> cacheBuild a}
 
@@ -232,7 +232,7 @@ sinkIO path write a = if isBuilt path (cacheBuild a)
 -- be integrated into the cache system like so:
 --
 -- >>> import System.Process (callCommand)
--- >>> let t = trigger "fig.png" (return <$> callCommand "plot") (Set.fromList ["data.csv"])
+-- >>> let t = trigger "fig.png" (callCommand "plot") (Set.fromList ["data.csv"])
 -- >>> prettyCached t >>= putStr
 -- Cached Value = ()
 -- Cached Needs:
@@ -240,7 +240,7 @@ sinkIO path write a = if isBuilt path (cacheBuild a)
 --   fig.png
 --     data.csv
 -- 
-trigger :: FilePath -> IO (Either Text ()) -> Set FilePath -> Cached ()
+trigger :: FilePath -> IO () -> Set FilePath -> Cached ()
 trigger path action needs = sinkIO path (\_ -> action) (fromIO needs (return ()))
 
 
