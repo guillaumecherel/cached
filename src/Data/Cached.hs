@@ -89,6 +89,7 @@ Cached Build:
 
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Cached (
   -- * Cached type
@@ -104,6 +105,10 @@ module Data.Cached (
   , cache
   , cache'
   , cacheIO
+  , cacheF
+  , cacheF'
+  , cacheRand
+  , cacheRand'
   , sink
   , sink'
   , sinkIO
@@ -118,6 +123,7 @@ module Data.Cached (
 import Protolude
 
 import Control.Monad.Fail
+import Control.Monad.Random.Lazy hiding (fail)
 import qualified Data.Set as Set
 import Data.Text
 import qualified Development.Shake as Shake
@@ -200,6 +206,60 @@ cacheIO path write read a = if isBuilt path (cacheBuild a)
                                ( cacheNeeds a )
                           <> cacheBuild a }
   where errMsg e = "Error reading file " <> pack path <> ": " <> e
+
+-- | Cache the result of a function.
+cacheF
+  :: FilePath
+  -> (b -> Text)
+  -> (Text -> Either Text b)
+  -> Cached (a -> b)
+  -> Cached a
+  -> Cached b
+cacheF path write read f a = cache path write read (f <*> a)
+
+cacheF'
+  :: (Show b, Read b)
+  => FilePath
+  -> Cached (a -> b)
+  -> Cached a
+  -> Cached b
+cacheF' path f a = cacheF path write read f a
+  where write = show
+        read = bimap pack identity . readEither . unpack
+
+-- | Cache a random value.
+cacheRand
+  :: forall a g. ()
+  => FilePath
+  -> (a -> Text)
+  -> (Text -> Either Text a)
+  -> (g -> Text)
+  -> (Text -> Either Text g)
+  -> Cached (Rand g a)
+  -> Cached g
+  -> Cached (Rand g a)
+cacheRand path writeA readA writeG readG a g =
+  (liftRand . const)
+  <$> cacheF path
+    (show . bimap writeA writeG :: (a, g) -> Text)
+    ( join
+    . traverse (\(txta, txtg) -> (,) <$> readA txta <*> readG txtg)
+    . first pack
+    . readEither . unpack)
+    (runRand <$> a)
+    g
+
+cacheRand'
+  :: forall a g. (Show a, Read a, Show g, Read g)
+  => FilePath
+  -> Cached (Rand g a)
+  -> Cached g
+  -> Cached (Rand g a)
+cacheRand' path a g = cacheRand path show read show read a g
+  where
+    read :: forall z. (Show z, Read z) => Text -> Either Text z
+    read = bimap pack identity . readEither . unpack
+
 
 -- | Associate a cached value to a file on disk without the possibility
 -- to read it back. Useful for storing to a text file the final result of a

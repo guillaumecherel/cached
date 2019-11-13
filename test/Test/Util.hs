@@ -77,7 +77,7 @@ testCached c value needs build = do
   (val', needs', build') <- materialize c
   return $ value ==? val'
       .&&. needs ==? needs'
-      .&&. build ==? build
+      .&&. build ==? build'
 
 
 -- Test equality of two cached values: values, needs, and builds. Runs all IO actions in the cache.

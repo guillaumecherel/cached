@@ -8,6 +8,7 @@ module Test.Data.Cached where
 
 import Protolude
 
+import Control.Monad.Random.Lazy
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -409,13 +410,89 @@ prop_cacheIO = once $
   in ioProperty $ do
     setDir dir []
     test1 <- testCached c1 (Right 1) (Set.singleton $ dir </> "c1")
-               (Map.fromList [(dir </> "c1", (Right "1", mempty))])
+      (Map.fromList [(dir </> "c1", (Right "1", mempty))])
     test2 <- testCached c3 (Right 3) (Set.singleton $ dir </> "c3")
-               (Map.fromList [(dir </> "c3", (Right "3", Set.fromList [dir </> "c1"
-                                                         ,dir </> "c2"]))
-                             ,(dir </> "c2", (Right "2", mempty))
-                             ,(dir </> "c1", (Right "1", mempty))])
+      (Map.fromList [(dir </> "c3", (Right "3", Set.fromList [dir </> "c1"
+                                              , dir </> "c2"]))
+                   ,(dir </> "c2", (Right "2", mempty))
+                   ,(dir </> "c1", (Right "1", mempty))])
     return $ test1 .&&. test2
+
+
+prop_cacheF' :: Property
+prop_cacheF' = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/cacheF'"
+      ca = cache' (dir </> "ca") (pure (2 :: Int))
+      cfa = cacheF' (dir </> "cfa") (pure (+ 1)) ca
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached ca (Right 2) (Set.singleton $ dir </> "ca")
+      (Map.fromList
+        [ ( dir </> "ca"
+          , (Right "2", mempty)
+          )
+        ])
+    test2 <- testCached cfa (Right 3) (Set.singleton $ dir </> "cfa")
+      (Map.fromList
+        [ ( dir </> "ca"
+          , ( Right "2" , mempty )
+          )
+        , ( dir </> "cfa"
+          , ( Right "3"
+            , Set.fromList [ dir </> "ca" ]
+            )
+          )
+        ])
+
+    return $ test1 .&&. test2
+
+prop_cacheRand' :: Property
+prop_cacheRand' = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/cacheRand'"
+      cg1 :: Cached StdGen
+      cg1 = cache' (dir </> "cg1") (pure (mkStdGen 1))
+      cg2 :: Cached StdGen
+      cg2 = cache' (dir </> "cg2") (pure (mkStdGen 2))
+      cr1 :: Cached (Rand StdGen Int)
+      cr1 = pure getRandom
+      cr2 :: Cached (Rand StdGen Int)
+      cr2 = cacheRand' (dir </> "cr2") cr1 cg1
+      crValue :: Cached Int
+      crValue = flip evalRand (mkStdGen 1) <$> cr2
+      crRandomGen :: Cached StdGen
+      crRandomGen = flip execRand (mkStdGen 1) <$> cr2
+      crValueBreak :: Cached Int
+      crValueBreak = flip evalRand (mkStdGen 2) <$> cr2
+      crRandomGenBreak :: Cached StdGen
+      crRandomGenBreak = flip execRand (mkStdGen 2) <$> cr2
+  in ioProperty $ do
+    setDir dir []
+    -- Test the cache file for the random generator state
+    test1 <- testCached
+      (show <$> cg1 :: Cached Text)
+      (Right (show $ mkStdGen 1 :: Text))
+      (Set.singleton $ dir </> "cg1")
+      (Map.fromList
+        [ ( dir </> "cg1"
+          , (Right (show $ mkStdGen 1), mempty)
+          )
+        ])
+    -- Test the cached random value
+    (cachedVal, _, _) <- materialize crValue
+    (cachedRandomGen, _, _) <- materialize crRandomGen
+    (cachedValBreak, _, _) <- materialize crValueBreak
+
+    return $
+           test1
+      .&&. (Right $ flip evalRand (mkStdGen 1) getRandom ) ==? cachedVal
+      .&&. (Right $ (show $ flip execRand (mkStdGen 1) (getRandom :: Rand StdGen Int) :: Text)) 
+           ==? fmap show cachedRandomGen
+      -- This value should be equal to the one evaluated with mkStdGen 1, even though it was actually evaluated with mkStdGen 2 above, because the cache has stored the value already with cr2. Since the dependencies haven't changed, the cached values are not recomputed. Also, the random generator value should also be equal to the one stored in the cache, and not to the next random generator that should normally come from using mkStdGen 2.
+      .&&. (Right $ flip evalRand (mkStdGen 1) getRandom ) ==? cachedValBreak
+      .&&. (Right $ (show $ flip execRand (mkStdGen 1) (getRandom :: Rand StdGen Int) :: Text)) 
+           ==? fmap show cachedRandomGen
+
+
 
 prop_sink :: Property
 prop_sink = once $
@@ -484,7 +561,7 @@ prop_trigger = once $
   in ioProperty $ do
     setDir dir []
     testCached c (Right ()) mempty
-               (Map.fromList [(dir </> "s1", (Right "1", (Set.fromList [dir </> "a"])))])
+               (Map.fromList [(dir </> "c", (Right "1", (Set.fromList [dir </> "a"])))])
 
 runTests = do
   checkOrExit "prop_SinValCreaCache" prop_SinValCreaCache
@@ -508,6 +585,8 @@ runTests = do
   checkOrExit "prop_cache" prop_cache
   checkOrExit "prop_cache'" prop_cache'
   checkOrExit "prop_cacheIO" prop_cacheIO
+  checkOrExit "prop_cacheF'" prop_cacheF'
+  checkOrExit "prop_cacheRand'" prop_cacheRand'
   checkOrExit "prop_sink" prop_sink
   checkOrExit "prop_sink'" prop_sink'
   checkOrExit "prop_sinkIO" prop_sinkIO
