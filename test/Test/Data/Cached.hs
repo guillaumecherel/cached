@@ -492,6 +492,33 @@ prop_cacheRand' = once $
       .&&. (Right $ (show $ flip execRand (mkStdGen 1) (getRandom :: Rand StdGen Int) :: Text)) 
            ==? fmap show cachedRandomGen
 
+prop_cacheMap' :: Property
+prop_cacheMap' = once $
+  let dir = "test-output/formulas/Util/Cached/Interface/cacheMap"
+      f = (+ 1)
+      ca :: Cached Int
+      ca = cache' ( dir </> "ca" ) ( pure 1 )
+      cb = cacheMap' (dir </> "cb") f ca
+  in ioProperty $ do
+    setDir dir []
+    test1 <- testCached ca (Right 1)
+      (Set.singleton $ dir </> "ca")
+      (Map.fromList
+        [ ( dir </> "ca"
+          , (Right "1", mempty)
+          )
+        ])
+    test2 <- testCached cb (Right 2)
+      (Set.singleton $ dir </> "cb")
+      (Map.fromList
+        [ ( dir </> "cb"
+          , ( Right "2"
+            , Set.fromList [dir </> "ca"])
+          )
+        , (dir </> "ca", (Right "1", mempty))
+        ])
+    return $ test1 .&&. test2
+
 
 
 prop_sink :: Property
@@ -587,6 +614,7 @@ runTests = do
   checkOrExit "prop_cacheIO" prop_cacheIO
   checkOrExit "prop_cacheF'" prop_cacheF'
   checkOrExit "prop_cacheRand'" prop_cacheRand'
+  checkOrExit "prop_cacheMap'" prop_cacheMap'
   checkOrExit "prop_sink" prop_sink
   checkOrExit "prop_sink'" prop_sink'
   checkOrExit "prop_sinkIO" prop_sinkIO

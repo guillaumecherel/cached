@@ -109,6 +109,8 @@ module Data.Cached (
   , cacheF'
   , cacheRand
   , cacheRand'
+  , cacheMap
+  , cacheMap'
   , sink
   , sink'
   , sinkIO
@@ -260,6 +262,23 @@ cacheRand' path a g = cacheRand path show read show read a g
     read :: forall z. (Show z, Read z) => Text -> Either Text z
     read = bimap pack identity . readEither . unpack
 
+cacheMap
+  :: forall a b.
+     FilePath
+  -> (b -> Text)
+  -> (Text -> Either Text b)
+  -> (a -> b)
+  -> Cached a
+  -> Cached b
+cacheMap path write read f a = cache path write read (f <$> a)
+
+cacheMap'
+  :: forall a b. (Show b, Read b)
+  => FilePath
+  -> (a -> b)
+  -> Cached a
+  -> Cached b
+cacheMap' path f a = cache' path (f <$> a)
 
 -- | Associate a cached value to a file on disk without the possibility
 -- to read it back. Useful for storing to a text file the final result of a
